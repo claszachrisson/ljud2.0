@@ -21,6 +21,7 @@ void Satellites::init() {
     write_pair(this->i2c_handle, 0x30, 0x01); // Set SDOUT to DSP input
     write_pair(this->i2c_handle, 0x60, 0x04); // Set GPIO2 to output
     write_pair(this->i2c_handle, 0x63, 0x09); // Set GPIO2 to output SDOUT
+    write_pair(this->i2c_handle, 0x33, 0x32); // Set data format to left-justified and 24-bit
     write_pair(this->i2c_handle, 0x4C, 0x60); // Set left channel to -24 dB
     write_pair(this->i2c_handle, 0x4D, 0x60); // Set right channel to -24 dB
 }

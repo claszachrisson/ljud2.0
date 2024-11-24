@@ -18,7 +18,8 @@ void Sub::init() {
     write_pair(this->i2c_handle, DEVICE_CTRL_2, 0x02); // Set power state to Hi-Z
     vTaskDelay(TICK_DELAY);
     write_pair(this->i2c_handle, DEVICE_CTRL_1, 0x04); // Set DAMP to PBTL mode
-    write_pair(this->i2c_handle, 0x4C, 0x48); // Set digital volume to -12 dB
+    write_pair(this->i2c_handle, 0x4C, 0x3C); // Set digital volume to -6 dB
+    write_pair(this->i2c_handle, 0x33, 0x32); // Set data format to left-justified and 24-bit
 
     // 100Hz butterworth LPF
     uint8_t bq_coeffs[21] = { 0x18,

@@ -34,6 +34,7 @@ void Codec::init() {
     write_pair(this->i2c_handle, 0x04, 0x81); // Set state to RUN
     vTaskDelay(TICK_DELAY);
     write_pair(this->i2c_handle, 0x05, 0x80); // Set serial audio mode to master
+    write_pair(this->i2c_handle, 0x01, 0x04); // Set HOLD to "replace the current audio sample with all zeros"
     write_pair(this->i2c_handle, 0x06, 0x7F); // Set receiver error mask to ones (unmasked)
 }
 
