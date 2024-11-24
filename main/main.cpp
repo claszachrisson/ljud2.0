@@ -10,8 +10,6 @@
 #include "esp_log.h"
 #include "esp_err.h"
 
-#define TIMER_PERIOD_MS 5000
-
 /*
 Todo:
 Rewrite lockActiveSource() to not use PLL lock
@@ -37,9 +35,12 @@ static const char *CODEC_TAG = "CODEC";
 static const char *AMPLR_TAG = "TAS5827";
 static const char *SUB_TAG = "TAS5805M";
 
-const TickType_t xDelay = 20 / portTICK_PERIOD_MS;
+const int sourceRefreshRate = 250; // 250 ms
+const TickType_t shortDelay = 20 / portTICK_PERIOD_MS;
 
 int currentSource = 0;
+int sourceLockCounter = 0;
+const int SOURCE_LOCK_MAX = 5000 / sourceRefreshRate;
 
 enum control_port {
 	GOTO_PG,
@@ -98,7 +99,7 @@ int checkPLLLocked(){
 	uint8_t data[1];
 	i2c_master_transmit_receive(codec_i2c, (uint8_t[]){0x0C}, 1, data, 1, -1); // Read register once to reset RERR
 	i2c_master_transmit_receive(codec_i2c, (uint8_t[]){0x0C}, 1, data, 1, -1);
-	ESP_LOGI(CODEC_TAG, "Receiver error: %02X", data[0]);
+	ESP_LOGW(CODEC_TAG, "Receiver error: %02X", data[0]);
 	if(data[0] & 16) { // UNLOCK bit is set
 		return 0;
 	}
@@ -110,9 +111,11 @@ int sourceIsActive(){
 	uint8_t data[1];
 	i2c_master_transmit_receive(codec_i2c, (uint8_t[]){0x0B}, 1, data, 1, -1);
 	if(data[0] & 2){ // Digital silence is set;
+		ESP_LOGW(CODEC_TAG, "Digital silence detected");
 		return 0;
 	}
-	return (data[0] & 0xF0) == 1;
+	ESP_LOGI(CODEC_TAG, "Format Detect Status: 0x%02X, valid: %d", data[0], ((data[0] & 0xF0)));
+	return (data[0] & 0xF0) > 1;
 }
 void changeSource() {
 	if(currentSource) { // Current source is RXP1, set to RXP0
@@ -127,20 +130,26 @@ void changeSource() {
 int lockActiveSource(){
 	// Needs rewriting as PLL may be locked without an audio data stream
 	// Either check codec for digital silence or !AUDIO on GPIO (needs configuring)
-	if(sourceIsActive()) return 1;
-	changeSource();
-	ESP_LOGI(CODEC_TAG, "Source changed");
+	if(sourceIsActive()) {
+		if(sourceLockCounter < SOURCE_LOCK_MAX) sourceLockCounter++;
+		return 1;
+	}
+	if(sourceLockCounter > 0) sourceLockCounter--;
+	if(sourceLockCounter==0) {
+		changeSource();
+		ESP_LOGI(CODEC_TAG, "Source changed");
+	}
 	return sourceIsActive();
 }
 void codec_init(){
 	i2c_master_transmit(codec_i2c, (uint8_t[]){0x04,0x81}, 2, -1); // Set state to RUN
-	vTaskDelay(xDelay);
+	vTaskDelay(shortDelay);
 	i2c_master_transmit(codec_i2c, (uint8_t[]){0x05,0x80}, 2, -1); // Set serial audio mode to master
 	i2c_master_transmit(codec_i2c, (uint8_t[]){0x06,0x7F}, 2, -1); // Set receiver error mask to ones (unmasked)
 }
 void amplr_init(){
 	i2c_master_transmit(amplr_i2c, (uint8_t[]){DEVICE_CTRL_2,0x02}, 2, -1); // Set power state to Hi-Z
-	vTaskDelay(xDelay);
+	vTaskDelay(shortDelay);
 	i2c_master_transmit(amplr_i2c, (uint8_t[]){0x30,0x01}, 2, -1); // Set SDOUT to DSP input
 	i2c_master_transmit(amplr_i2c, (uint8_t[]){0x60,0x04}, 2, -1); // Set GPIO2 to output
 	i2c_master_transmit(amplr_i2c, (uint8_t[]){0x63,0x09}, 2, -1); // Set GPIO2 to output SDOUT
@@ -149,7 +158,7 @@ void amplr_init(){
 }
 void sub_init(){
 	i2c_master_transmit(sub_i2c, (uint8_t[]){DEVICE_CTRL_2,0x02}, 2, -1); // Set power state to Hi-Z
-	vTaskDelay(xDelay);
+	vTaskDelay(shortDelay);
 	i2c_master_transmit(sub_i2c, (uint8_t[]){DEVICE_CTRL_1,0x04}, 2, -1); // Set DAMP to PBTL mode
 	i2c_master_transmit(sub_i2c, (uint8_t[]){0x4C,0x48}, 2, -1); // Set digital volume to -12 dB
 
@@ -204,28 +213,14 @@ uint8_t getPowerState(i2c_master_dev_handle_t *dev_handle, bool log=false, const
 	return data[0];
 }
 
-void task_function(void *pvParameter) {
-	/*
-	Right now lockActiveSource() is called to check channels for audio 
-	every time task_function() is called.
-	Better strategy would be to have a cooldown, maybe lock a source for
-	x seconds every time audio is detected, and keep updating cooldown 
-	each time.
-	Maybe something like this (increases time lock for every iteration
-	that audio is present, to a max lock of a minute (assuming it's run
-	once every second), to not lock excessively on short bursts)
-
-	int timelock = 0;
-	if(audio & (timelock < 60)) { lock++; }
-	elseif(!audio) lock--;
-	*/
+void codec_task_source_autoselect(void *pvParameter) {
 	lockActiveSource();
-	ampsErrorCheck();
+	//ampsErrorCheck();
 	vTaskDelete(NULL);  // Delete the task when done
 }
 
 void timer_callback(TimerHandle_t xTimer) {
-	xTaskCreate(&task_function, "WorkTask", 4096, NULL, 5, NULL);
+	xTaskCreate(&codec_task_source_autoselect, "CodecSourceAutoselectTask", 4096, NULL, 5, NULL);
 }
 
 extern "C" void app_main(void)
@@ -250,12 +245,12 @@ extern "C" void app_main(void)
 		ESP_LOGE(I2C_TAG, "Failed probing TAS5805M: %d", err);
 	}
 
-	while(!lockActiveSource()) { // Wait for PLL to lock before continuing
-		vTaskDelay(2000 / portTICK_PERIOD_MS);
+	while(!checkPLLLocked()) { // Wait for PLL to lock before continuing
+		changeSource();
+		vTaskDelay(sourceRefreshRate / portTICK_PERIOD_MS);
 	}
-	if(checkPLLLocked()) {
-		sub_init();
-	}
+	sub_init();
+
 	ESP_LOGI("APP_MAIN", "Amps initialised");
 
 	getPowerState(&amplr_i2c, true, AMPLR_TAG);
@@ -265,7 +260,7 @@ extern "C" void app_main(void)
 		i2c_master_transmit(amplr_i2c, (uint8_t[]){0x03,0x03}, 2, -1);
 		i2c_master_transmit(sub_i2c, (uint8_t[]){0x03,0x03}, 2, -1);
 	}
-	vTaskDelay(xDelay);
+	vTaskDelay(shortDelay);
 
 	uint8_t pwrstate = getPowerState(&amplr_i2c);
 	if(pwrstate != 0x03) {
@@ -277,7 +272,7 @@ extern "C" void app_main(void)
 	}
 	int playing = 0;
 	while(!playing){
-		vTaskDelay(xDelay);
+		vTaskDelay(shortDelay);
 		esp_err_t err = ampsErrorCheck();
 		if(err == ESP_OK){
 			i2c_master_transmit(amplr_i2c, (uint8_t[]){0x03,0x03}, 2, -1);
@@ -294,7 +289,7 @@ extern "C" void app_main(void)
 		}
 	}
 
-	TimerHandle_t timer = xTimerCreate("MyTimer", pdMS_TO_TICKS(TIMER_PERIOD_MS), pdTRUE, (void *)0, timer_callback);
+	TimerHandle_t timer = xTimerCreate("MyTimer", pdMS_TO_TICKS(sourceRefreshRate), pdTRUE, (void *)0, timer_callback);
 	// Check if the timer was created successfully
 	if (timer != NULL) {
 			// Start the timer
