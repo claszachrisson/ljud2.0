@@ -1,3 +1,12 @@
 idf_component_register(SRCS "main.cpp"
-                    INCLUDE_DIRS ""
-                    PRIV_REQUIRES driver esp_driver_i2c)
+        "i2c.cpp"
+        "i2c.h"
+        "devices/device_component.h"
+        "devices/device_component.cpp"
+        "devices/amplifier.h"
+        "devices/amplifier.cpp"
+        "devices/satellites.cpp"
+        "devices/codec.cpp"
+        "devices/sub.cpp"
+        "devices/regs.h"
+        PRIV_REQUIRES driver esp_driver_i2c)
