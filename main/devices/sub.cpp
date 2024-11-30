@@ -3,12 +3,11 @@
 #include "regs.h"
 #include "../i2c.h"
 
-static constexpr uint16_t SUB_ADDR = 0x2C;
 static auto SUB_TAG = "TAS5805M";
 
 class Sub final : public Amplifier {
 public:
-    Sub(i2c_master_bus_handle_t i2c_bus): Amplifier(i2c_bus, SUB_ADDR, SUB_TAG) {}
+    Sub(i2c_master_bus_handle_t i2c_bus, uint16_t sub_addr): Amplifier(i2c_bus, sub_addr, SUB_TAG) {}
     ~Sub() override = default;
 
     void init() override;

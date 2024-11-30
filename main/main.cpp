@@ -45,9 +45,19 @@ extern "C" void app_main(void) {
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &i2c_bus));
 
+    // Find the address of the sub dynamically since it tends to move around
+    uint16_t sub_addr = 0x2C;
+    for (int i = 0x2C; i <= 0x2F; ++i) {
+        esp_err_t status = i2c_master_probe(i2c_bus, i, 10);
+        if (status == ESP_OK) {
+            sub_addr = i;
+            ESP_LOGI("main", "Found sub at 0x%02X", i);
+        }
+    }
+
     codec = new Codec(i2c_bus);
     const auto satellites = new Satellites(i2c_bus);
-    const auto sub = new Sub(i2c_bus);
+    const auto sub = new Sub(i2c_bus, sub_addr);
     int init_codec = codec->device_init();
     int init_satellites = satellites->device_init();
     int init_sub = sub->device_init();
