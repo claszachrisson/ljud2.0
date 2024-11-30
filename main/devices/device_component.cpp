@@ -32,7 +32,7 @@ int DeviceComponent::device_init() {
 esp_err_t DeviceComponent::i2c_probe() const {
     esp_err_t status = i2c_master_probe(this->i2c_bus, this->device_address, 10);
     if (status != ESP_OK) {
-        ESP_LOGE(this->device_name, "Failed probing codec: %d", status);
+        ESP_LOGE(this->device_name, "Failed probing device: %x", status);
     }
 
     return status;
