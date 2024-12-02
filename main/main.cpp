@@ -18,7 +18,7 @@ i2c_master_bus_handle_t i2c_bus;
 Codec *codec;
 
 void codec_task_source_autoselect(void *pvParameter) {
-    codec->lockActiveSource();
+    codec->lock_active_source();
     //ampsErrorCheck();
     vTaskDelete(NULL); // Delete the task when done
 }
@@ -45,9 +45,19 @@ extern "C" void app_main(void) {
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_mst_config, &i2c_bus));
 
+    // Find the address of the sub dynamically since it tends to move around
+    uint16_t sub_addr = 0x2C;
+    for (int i = 0x2C; i <= 0x2F; ++i) {
+        esp_err_t status = i2c_master_probe(i2c_bus, i, 10);
+        if (status == ESP_OK) {
+            sub_addr = i;
+            ESP_LOGI("main", "Found sub at 0x%02X", i);
+        }
+    }
+
     codec = new Codec(i2c_bus);
     const auto satellites = new Satellites(i2c_bus);
-    const auto sub = new Sub(i2c_bus);
+    const auto sub = new Sub(i2c_bus, sub_addr);
     int init_codec = codec->device_init();
     int init_satellites = satellites->device_init();
     int init_sub = sub->device_init();
@@ -61,19 +71,19 @@ extern "C" void app_main(void) {
 
     // Probe I2C bus status for all components
     esp_err_t probe_codec = codec->i2c_probe();
-    esp_err_t probe_satellites = sub->i2c_probe();
+    esp_err_t probe_satellites = satellites->i2c_probe();
     esp_err_t probe_sub = sub->i2c_probe();
 
     if (probe_codec | probe_satellites | probe_sub) {
-        ESP_LOGE("MAIN", "Device probe failed; codec: %d, TAS5827: %d, TAS5805M: %d", probe_codec, probe_satellites,
+        ESP_LOGE("MAIN", "Device probe failed; codec: %x, TAS5827: %x, TAS5805M: %x", probe_codec, probe_satellites,
                  probe_sub);
     }
 
     // Initialize Sub only after we have acquired a PLL lock
-    while (!codec->checkPLLLocked()) {
+    while (!codec->check_pll_locked()) {
         // Wait for PLL to lock before continuing
-        codec->changeSource();
-        vTaskDelay(sourceRefreshRate / portTICK_PERIOD_MS);
+        codec->change_source();
+        vTaskDelay(source_refresh_rate / portTICK_PERIOD_MS);
     }
 
     sub->init();
@@ -109,7 +119,7 @@ extern "C" void app_main(void) {
         }
     }
 
-    TimerHandle_t timer = xTimerCreate("MyTimer", pdMS_TO_TICKS(sourceRefreshRate), pdTRUE, (void *) 0, timer_callback);
+    TimerHandle_t timer = xTimerCreate("MyTimer", pdMS_TO_TICKS(source_refresh_rate), pdTRUE, (void *) 0, timer_callback);
     // Check if the timer was created successfully
     if (timer != NULL) {
         // Start the timer
