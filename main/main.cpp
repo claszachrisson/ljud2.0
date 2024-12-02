@@ -27,6 +27,20 @@ void timer_callback(TimerHandle_t xTimer) {
     xTaskCreate(&codec_task_source_autoselect, "CodecSourceAutoselectTask", 4096, NULL, 5, NULL);
 }
 
+static void codec_event_cb(codec_cb_event_t event, codec_event_param_t *param) {
+    switch (event) {
+    case CODEC_SOURCE_EVT:
+        if (param->source_state.state == CODEC_SOURCE_UNLOCK) {
+            // Do something with amps, etc
+        }
+        break;
+    case CODEC_RECEIVER_ERR_EVT:
+    default:
+        ESP_LOGW("codec_event_cb", "Invalid codec event: %d", event);
+        break;
+    }
+}
+
 
 extern "C" void app_main(void) {
     // Set PDN high to enable amplifiers
@@ -78,6 +92,8 @@ extern "C" void app_main(void) {
         ESP_LOGE("MAIN", "Device probe failed; codec: %x, TAS5827: %x, TAS5805M: %x", probe_codec, probe_satellites,
                  probe_sub);
     }
+
+    codec->register_event_callback(codec_event_cb);
 
     // Initialize Sub only after we have acquired a PLL lock
     while (!codec->check_pll_locked()) {
