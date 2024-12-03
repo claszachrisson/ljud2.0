@@ -51,7 +51,6 @@ public:
     void register_event_callback(void (*event_callback)(codec_cb_event_t event, codec_event_param_t *param));
 
 private:
-    bool enabled = false;
     int current_source = 0;
     int source_lock_counter = 0;
     codec_source_state_t source_state = CODEC_SOURCE_UNLOCK;
@@ -66,7 +65,6 @@ void Codec::init() {
     write_pair(this->i2c_handle, SERIAL_AUDIO_FORMAT, 0x80); // Set serial audio mode to master
     write_pair(this->i2c_handle, 0x01, 0x04); // Set HOLD to "replace the current audio sample with all zeros"
     write_pair(this->i2c_handle, RECEIVER_ERROR_MASK, 0x7F); // Set receiver error mask to ones (unmasked)
-    enabled = true;
 }
 
 int Codec::check_pll_locked(const bool log = false) {
@@ -99,12 +97,12 @@ int Codec::source_is_active() {
     const uint8_t format = receive_single(this->i2c_handle, AUDIO_FORMAT_DETECT);
     if (format & 2) {
         // Digital silence is set;
-        ESP_LOGW(CODEC_TAG, "Digital silence detected");
+        ESP_LOGI(CODEC_TAG, "Digital silence detected");
         state_update(CODEC_SOURCE_INACTIVE);
         return 0;
     }
-    ESP_LOGI(CODEC_TAG, "Format Detect Status: 0x%02X, valid: %d", format, ((format & 0xF0)));
-    uint8_t bits = format & 0xF0;
+    ESP_LOGD(CODEC_TAG, "Format Detect Status: 0x%02X", format);
+    uint8_t bits = format & 0x78;
     if (bits && !(bits & (bits-1))) { // Exactly one bit is set
         state_update(CODEC_SOURCE_ACTIVE);
         return 1;

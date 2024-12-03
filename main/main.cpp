@@ -66,6 +66,7 @@ extern "C" void app_main(void) {
         if (status == ESP_OK) {
             sub_addr = i;
             ESP_LOGI("main", "Found sub at 0x%02X", i);
+            break;
         }
     }
 
