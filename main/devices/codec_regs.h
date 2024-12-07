@@ -2,6 +2,7 @@
 #define CODEC_REGS_H
 
 enum codec_control_port {
+    CONTROL_1 = 0x01,
     CONTROL_4 = 0x04,
     SERIAL_AUDIO_FORMAT = 0x05,
     RECEIVER_ERROR_MASK = 0x06,
