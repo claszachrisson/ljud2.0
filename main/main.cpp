@@ -61,7 +61,7 @@ extern "C" void app_main(void) {
 
     // Find the address of the sub dynamically since it tends to move around
     uint16_t sub_addr = 0x2C;
-    for (int i = 0x2C; i <= 0x2F; ++i) {
+    for (int i = 0x2C; i <= 0x2F; i++) {
         esp_err_t status = i2c_master_probe(i2c_bus, i, 10);
         if (status == ESP_OK) {
             sub_addr = i;
@@ -136,9 +136,9 @@ extern "C" void app_main(void) {
         }
     }
 
-    TimerHandle_t timer = xTimerCreate("MyTimer", pdMS_TO_TICKS(source_refresh_rate), pdTRUE, (void *) 0, timer_callback);
+    TimerHandle_t timer = xTimerCreate("MyTimer", pdMS_TO_TICKS(source_refresh_rate), pdTRUE, 0, timer_callback);
     // Check if the timer was created successfully
-    if (timer != NULL) {
+    if (timer != nullptr) {
         // Start the timer
         xTimerStart(timer, 0);
     } else {

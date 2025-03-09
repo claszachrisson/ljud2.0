@@ -35,7 +35,8 @@ typedef union {
 
 class Codec : public DeviceComponent {
 public:
-    Codec(i2c_master_bus_handle_t i2c_bus) : DeviceComponent(i2c_bus, CODEC_ADDR, CODEC_TAG) {
+    explicit Codec(i2c_master_bus_handle_t i2c_bus) : DeviceComponent(i2c_bus, CODEC_ADDR, CODEC_TAG) {
+        this->event_callback = nullptr;
     }
 
     int check_pll_locked(bool log);
@@ -55,7 +56,7 @@ private:
     int source_lock_counter = 0;
     codec_source_state_t source_state = CODEC_SOURCE_UNLOCK;
     int previous_event_source = current_source;
-    void (*event_callback);
+    void (*event_callback)(codec_cb_event_t, codec_event_param_t*);
     void state_update(codec_source_state_t state);
 };
 
@@ -63,7 +64,7 @@ void Codec::init() {
     write_pair(this->i2c_handle, CONTROL_4, 0x81); // Set state to RUN
     vTaskDelay(TICK_DELAY);
     write_pair(this->i2c_handle, SERIAL_AUDIO_FORMAT, 0x80); // Set serial audio mode to master
-    write_pair(this->i2c_handle, 0x01, 0x04); // Set HOLD to "replace the current audio sample with all zeros"
+    write_pair(this->i2c_handle, CONTROL_1, 0x04); // Set HOLD to "replace the current audio sample with all zeros"
     write_pair(this->i2c_handle, RECEIVER_ERROR_MASK, 0x7F); // Set receiver error mask to ones (unmasked)
 }
 
@@ -142,6 +143,9 @@ void Codec::register_event_callback(void (*event_callback)(codec_cb_event_t even
 
 void Codec::state_update(codec_source_state_t state)
 {
+    if (event_callback == nullptr)
+        return;
+
     // Only send callback when state is changed, or source has updated since previous event
     if (source_state != state || previous_event_source != current_source) {
         source_state = state;
