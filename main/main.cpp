@@ -1,5 +1,8 @@
 #include <cstdio>
 #include <cstring>
+#include <nvs_flash.h>
+#include <nimble/nimble_port_freertos.h>
+
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -13,9 +16,15 @@
 #include "devices/codec.cpp"
 #include "devices/satellites.cpp"
 #include "devices/sub.cpp"
+#include "NimBLEDevice.h"
+#include "ble/ble.cpp"
 
 i2c_master_bus_handle_t i2c_bus;
 Codec *codec;
+Satellites *satellites;
+Sub *sub;
+
+uint3 volume;
 
 void codec_task_source_autoselect(void *pvParameter) {
     codec->lock_active_source();
@@ -29,18 +38,30 @@ void timer_callback(TimerHandle_t xTimer) {
 
 static void codec_event_cb(codec_cb_event_t event, codec_event_param_t *param) {
     switch (event) {
-    case CODEC_SOURCE_EVT:
-        if (param->source_state.state == CODEC_SOURCE_UNLOCK) {
-            // Do something with amps, etc
-        }
-        break;
-    case CODEC_RECEIVER_ERR_EVT:
-    default:
-        ESP_LOGW("codec_event_cb", "Invalid codec event: %d", event);
-        break;
+        case CODEC_SOURCE_EVT:
+            switch (param->source_state.state) {
+                case CODEC_SOURCE_UNLOCK:
+                case CODEC_SOURCE_INACTIVE:
+                    satellites->set_volume(uint3(0));
+                    return;
+                case CODEC_SOURCE_ACTIVE:
+                    satellites->set_volume(volume);
+                    return;
+                default:
+                    ESP_LOGI("Codec_CB", "Codec SOURCE_EVT CB: source_state %d", param->source_state.state);
+                    return;
+            }
+        case CODEC_RECEIVER_ERR_EVT:
+        default:
+            ESP_LOGW("codec_event_cb", "Invalid codec event: %d", event);
+            break;
     }
 }
 
+static void ble_volume_chg_cb(uint3 vol) {
+    ESP_LOGI("Main", "Volume changed to %d", vol.value);
+    volume = vol;
+}
 
 extern "C" void app_main(void) {
     // Set PDN high to enable amplifiers
@@ -70,14 +91,44 @@ extern "C" void app_main(void) {
         }
     }
 
+    // Init flash memory
+    esp_err_t flash = nvs_flash_init();
+    if (flash == ESP_ERR_NVS_NO_FREE_PAGES || flash == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        flash = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(flash);
+
+    // Init Bluetooth LE
+    esp_log_level_set("NimBLEService", ESP_LOG_VERBOSE);
+    NimBLEDevice::init("Flåsen");
+    NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND);
+    NimBLEDevice::setSecurityPasskey(120020);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
+
+    NimBLEServer *server = NimBLEDevice::createServer();
+
+    NimBLEService *service = server->createService("A0FE");
+    NimBLECharacteristic *volume = service->createCharacteristic("1200", READ | WRITE, 1);
+    auto *chrCallbacks = new VolumeCharacteristic(ble_volume_chg_cb);
+    volume->setCallbacks(chrCallbacks);
+    volume->setValue(5);
+
+    service->start();
+    NimBLEAdvertising *advertising = NimBLEDevice::getAdvertising();
+    advertising->addServiceUUID("A0FE");
+    advertising->setName("Flåsen");
+    advertising->start();
+
     codec = new Codec(i2c_bus);
-    const auto satellites = new Satellites(i2c_bus);
-    const auto sub = new Sub(i2c_bus, sub_addr);
+    satellites = new Satellites(i2c_bus);
+    sub = new Sub(i2c_bus, sub_addr);
     int init_codec = codec->device_init();
     int init_satellites = satellites->device_init();
     int init_sub = sub->device_init();
     if (init_codec | init_satellites | init_sub) {
-        ESP_LOGE("ERROR", "Device initialization failed: codec %d, satellites %d, sub %d", init_codec, init_satellites, init_sub);
+        ESP_LOGE("ERROR", "Device initialization failed: codec %d, satellites %d, sub %d", init_codec, init_satellites,
+                 init_sub);
     }
 
     // Initialize codec and satellites configuration

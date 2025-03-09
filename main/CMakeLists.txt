@@ -1,13 +1,11 @@
-idf_component_register(SRCS "main.cpp"
-        "i2c.cpp"
+file(GLOB_RECURSE srcs "main.cpp"
         "i2c.h"
-        "devices/device_component.h"
-        "devices/device_component.cpp"
-        "devices/amplifier.h"
-        "devices/amplifier.cpp"
-        "devices/codec.cpp"
-        "devices/codec_regs.h"
-        "devices/satellites.cpp"
-        "devices/sub.cpp"
-        "devices/regs.h"
-        PRIV_REQUIRES driver esp_driver_i2c)
+        "i2c.cpp"
+        "uint3.h"
+        "devices/*.h"
+        "devices/*.cpp"
+        "ble/ble.h"
+        "ble/ble.cpp")
+
+idf_component_register(SRCS "${srcs}"
+        PRIV_REQUIRES driver esp_driver_i2c bt nvs_flash)
